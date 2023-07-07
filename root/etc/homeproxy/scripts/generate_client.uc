@@ -265,6 +265,19 @@ config.log = {
 	output: RUN_DIR + '/sing-box-c.log',
 	timestamp: true
 };
+/* Clash api */
+config.experimental = {
+	clash_api: {
+		external_controller: '0.0.0.0:9090',
+		external_ui: 'yacd',
+		external_ui_download_url: 'https://github.com/MetaCubeX/Yacd-meta/archive/gh-pages.zip',
+		external_ui_download_detour: get_outbound(default_outbound),
+		secret: '',
+		default_mode: 'rule',
+		store_selected: true,
+		cache_file: '/etc/homeproxy/resources/cache.db'
+	}
+};
 
 /* DNS start */
 /* Default settings */
@@ -277,7 +290,7 @@ config.dns = {
 		},
 		{
 			tag: 'block-dns',
-			address: 'rcode://name_error'
+			address: 'rcode://success'
 		}
 	],
 	rules: [],
@@ -318,7 +331,7 @@ if (!isEmpty(main_node)) {
 	if (dns_server !== wan_dns) {
 		push(config.dns.servers, {
 			tag: 'main-dns',
-			address: 'tcp://' + (validation('ip6addr', dns_server) ? `[${dns_server}]` : dns_server),
+			address: 'tls://' + (validation('ip6addr', dns_server) ? `[${dns_server}]` : dns_server),
 			strategy: (ipv6_support !== '1') ? 'ipv4_only' : null,
 			detour: 'main-out'
 		});
