@@ -11,7 +11,7 @@ import { readfile, writefile } from 'fs';
 import { cursor } from 'uci';
 
 import {
-	executeCommand, isEmpty, strToInt,
+	executeCommand, isEmpty, strToBool, strToInt,
 	removeBlankAttrs, validateHostname, validation,
 	HP_DIR, RUN_DIR
 } from 'homeproxy';
@@ -123,25 +123,27 @@ function generate_outbound(node) {
 		tag: 'cfg-' + node['.name'] + '-out',
 		routing_mark: strToInt(self_mark),
 
-		server: (node.type !== 'direct') ? node.address : null,
-		server_port: (node.type !== 'direct') ? int(node.port) : null,
+		server: node.address,
+		server_port: strToInt(node.port),
 
 		username: node.username,
 		password: node.password,
 
 		/* Direct */
-		override_address: (node.type === 'direct') ? node.address : null,
-		override_port: (node.type === 'direct') ? node.port : null,
-		proxy_protocol: strToInt(node.proxy_protocol),
-		/* Hysteria */
+		override_address: node.override_address,
+		override_port: strToInt(node.override_port),
+		/* Hysteria (2) */
 		up_mbps: strToInt(node.hysteria_down_mbps),
 		down_mbps: strToInt(node.hysteria_down_mbps),
-		obfs: node.hysteria_bofs_password,
+		obfs: node.hysteria_obfs_type ? {
+			type: node.hysteria_obfs_type,
+			password: node.hysteria_obfs_password
+		} : node.hysteria_obfs_password,
 		auth: (node.hysteria_auth_type === 'base64') ? node.hysteria_auth_payload : null,
 		auth_str: (node.hysteria_auth_type === 'string') ? node.hysteria_auth_payload : null,
 		recv_window_conn: strToInt(node.hysteria_recv_window_conn),
 		recv_window: strToInt(node.hysteria_revc_window),
-		disable_mtu_discovery: (node.hysteria_disable_mtu_discovery === '1') || null,
+		disable_mtu_discovery: strToBool(node.hysteria_disable_mtu_discovery),
 		/* Shadowsocks */
 		method: node.shadowsocks_encrypt_method || node.shadowsocksr_encrypt_method,
 		plugin: node.shadowsocks_plugin,
@@ -153,8 +155,14 @@ function generate_outbound(node) {
 		obfs_param: node.shadowsocksr_obfs_param,
 		/* ShadowTLS / Socks */
 		version: (node.type === 'shadowtls') ? strToInt(node.shadowtls_version) : ((node.type === 'socks') ? node.socks_version : null),
-		/* VLESS / VMess */
+		/* Tuic */
 		uuid: node.uuid,
+		congestion_control: node.tuic_congestion_control,
+		udp_relay_mode: node.tuic_udp_relay_mode,
+		udp_over_stream: strToBool(node.tuic_udp_over_stream),
+		zero_rtt_handshake: strToBool(node.tuic_enable_zero_rtt),
+		heartbeat: node.tuic_heartbeat ? (node.tuic_heartbeat + 's') : null,
+		/* VLESS / VMess */
 		flow: node.vless_flow,
 		alter_id: strToInt(node.vmess_alterid),
 		security: node.vmess_encrypt,
@@ -169,7 +177,7 @@ function generate_outbound(node) {
 		peer_public_key: node.wireguard_peer_public_key,
 		pre_shared_key: node.wireguard_pre_shared_key,
 		reserved: parse_port(node.wireguard_reserved),
-		mtu: node.wireguard_mtu,
+		mtu: strToInt(node.wireguard_mtu),
 
 		multiplex: (node.multiplex === '1') ? {
 			enabled: true,
@@ -217,14 +225,15 @@ function generate_outbound(node) {
 			service_name: node.grpc_servicename,
 			idle_timeout: node.http_idle_timeout ? (node.http_idle_timeout + 's') : null,
 			ping_timeout: node.http_ping_timeout ? (node.http_ping_timeout + 's') : null,
-			permit_without_stream: (node.grpc_permit_without_stream === '1') || null
+			permit_without_stream: strToBool(node.grpc_permit_without_stream)
 		} : null,
 		udp_over_tcp: (node.udp_over_tcp === '1') ? {
 			enabled: true,
 			version: strToInt(node.udp_over_tcp_version)
 		} : null,
-		tcp_fast_open: (node.tcp_fast_open === '1') || null,
-		udp_fragment: (node.udp_fragment === '1') || null
+		tcp_fast_open: strToBool(node.tcp_fast_open),
+		tcp_multi_path: strToBool(node.tcp_multi_path),
+		udp_fragment: strToBool(node.udp_fragment)
 	};
 
 	return outbound;
@@ -383,7 +392,7 @@ if (!isEmpty(main_node)) {
 			invert: (cfg.invert === '1'),
 			outbound: get_outbound(cfg.outbound),
 			server: get_resolver(cfg.server),
-			disable_cache: (cfg.disable_cache === '1')
+			disable_cache: (cfg.dns_disable_cache === '1')
 		});
 	});
 
@@ -435,7 +444,7 @@ if (match(proxy_mode, /tun/))
 		inet6_address: (ipv6_support === '1') ? tun_addr6 : null,
 		mtu: strToInt(tun_mtu),
 		auto_route: false,
-		endpoint_independent_nat: (endpoint_independent_nat === '1') || null,
+		endpoint_independent_nat: strToBool(endpoint_independent_nat),
 		stack: tcpip_stack,
 		sniff: true,
 		sniff_override_destination: (sniff_override === '1'),

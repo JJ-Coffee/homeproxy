@@ -67,6 +67,30 @@ function parseShareLink(uri, features) {
 			};
 
 			break;
+		case 'hysteria2':
+		case 'hy2':
+			/* https://v2.hysteria.network/docs/developers/URI-Scheme/ */
+			var url = new URL('http://' + uri[1]);
+			var params = url.searchParams;
+
+			/* userpass auth is not supported by sing-box */
+			if (!features.with_quic || url.password)
+				return null;
+
+			config = {
+				label: url.hash ? decodeURIComponent(url.hash.slice(1)) : null,
+				type: 'hysteria2',
+				address: url.hostname,
+				port: url.port || '80',
+				password: url.username ? decodeURIComponent(url.username) : null,
+				hysteria_obfs_type: params.get('obfs'),
+				hysteria_obfs_password: params.get('obfs-password'),
+				tls: '1',
+				tls_sni: params.get('sni'),
+				tls_insecure: params.get('insecure') ? '1' : '0'
+			};
+
+			break;
 		case 'socks':
 		case 'socks4':
 		case 'socks4a':
@@ -209,6 +233,30 @@ function parseShareLink(uri, features) {
 				}
 				break;
 			}
+
+			break;
+		case 'tuic':
+			/* https://github.com/daeuniverse/dae/discussions/182 */
+			var url = new URL('http://' + uri[1]);
+			var params = url.searchParams;
+
+			/* Check if uuid exists */
+			if (!url.username)
+				return null;
+
+			config = {
+				label: url.hash ? decodeURIComponent(url.hash.slice(1)) : null,
+				type: 'tuic',
+				address: url.hostname,
+				port: url.port || '80',
+				uuid: url.username,
+				password: url.password ? decodeURIComponent(url.password) : null,
+				tuic_congestion_control: params.get('congestion_control'),
+				tuic_udp_relay_mode: params.get('udp_relay_mode'),
+				tls: '1',
+				tls_sni: params.get('sni'),
+				tls_alpn: params.get('alpn') ? decodeURIComponent(params.get('alpn')).split(',') : null
+			};
 
 			break;
 		case 'vless':
@@ -420,8 +468,9 @@ return view.extend({
 									.then(L.bind(this.map.reset, this.map))
 									.then(L.ui.hideModal)
 									.catch(function() {});
-							} else
+							} else {
 								return ui.hideModal();
+							}
 						})
 					}, [ _('Import') ])
 				])
@@ -487,14 +536,18 @@ return view.extend({
 		so = ss.option(form.ListValue, 'type', _('Type'));
 		so.value('direct', _('Direct'));
 		so.value('http', _('HTTP'));
-		if (features.with_quic)
+		if (features.with_quic) {
 			so.value('hysteria', _('Hysteria'));
+			so.value('hysteria2', _('Hysteria2'));
+		}
 		so.value('shadowsocks', _('Shadowsocks'));
 		if (features.with_shadowsocksr)
 			so.value('shadowsocksr', _('ShadowsocksR'));
 		so.value('shadowtls', _('ShadowTLS'));
 		so.value('socks', _('Socks'));
 		so.value('trojan', _('Trojan'));
+		if (features.with_quic)
+			so.value('tuic', _('Tuic'));
 		if (features.with_wireguard)
 			so.value('wireguard', _('WireGuard'));
 		so.value('vless', _('VLESS'));
@@ -503,10 +556,12 @@ return view.extend({
 
 		so = ss.option(form.Value, 'address', _('Address'));
 		so.datatype = 'host';
+		so.depends({'type': 'direct', '!reverse': true});
 		so.rmempty = false;
 
 		so = ss.option(form.Value, 'port', _('Port'));
 		so.datatype = 'port';
+		so.depends({'type': 'direct', '!reverse': true});
 		so.rmempty = false;
 
 		so = ss.option(form.Value, 'username', _('Username'));
@@ -517,9 +572,11 @@ return view.extend({
 		so = ss.option(form.Value, 'password', _('Password'));
 		so.password = true;
 		so.depends('type', 'http');
+		so.depends('type', 'hysteria2');
 		so.depends('type', 'shadowsocks');
 		so.depends('type', 'shadowsocksr');
 		so.depends('type', 'trojan');
+		so.depends('type', 'tuic');
 		so.depends({'type': 'shadowtls', 'shadowtls_version': '2'});
 		so.depends({'type': 'shadowtls', 'shadowtls_version': '3'});
 		so.depends({'type': 'socks', 'socks_version': '5'});
@@ -548,15 +605,17 @@ return view.extend({
 		so.modalonly = true;
 
 		/* Direct config */
-		so = ss.option(form.ListValue, 'proxy_protocol', _('Proxy protocol'),
-			_('Write Proxy Protocol in the connection header.'));
-		so.value('', _('Disable'));
-		so.value('1');
-		so.value('2');
+		so = ss.option(form.Value, 'override_address', _('Override address'),
+			_('Override the connection destination address.'));
+		so.datatype = 'host';
 		so.depends('type', 'direct');
-		so.modalonly = true;
 
-		/* Hysteria config start */
+		so = ss.option(form.Value, 'override_port', _('Override port'),
+			_('Override the connection destination port.'));
+		so.datatype = 'port';
+		so.depends('type', 'direct');
+
+		/* Hysteria (2) config start */
 		so = ss.option(form.ListValue, 'hysteria_protocol', _('Protocol'));
 		so.value('udp');
 		/* WeChat-Video / FakeTCP are unsupported by sing-box currently
@@ -569,34 +628,40 @@ return view.extend({
 		so.modalonly = true;
 
 		so = ss.option(form.ListValue, 'hysteria_auth_type', _('Authentication type'));
-		so.value('disabled', _('Disable'));
+		so.value('', _('Disable'));
 		so.value('base64', _('Base64'));
 		so.value('string', _('String'));
-		so.default = 'disabled';
 		so.depends('type', 'hysteria');
-		so.rmempty = false;
 		so.modalonly = true;
 
 		so = ss.option(form.Value, 'hysteria_auth_payload', _('Authentication payload'));
-		so.depends({'type': 'hysteria', 'hysteria_auth_type': 'base64'});
-		so.depends({'type': 'hysteria', 'hysteria_auth_type': 'string'});
+		so.depends({'type': 'hysteria', 'hysteria_auth_type': /[\s\S]/});
 		so.rmempty = false;
+		so.modalonly = true;
+
+		so = ss.option(form.ListValue, 'hysteria_obfs_type', _('Obfuscate type'));
+		so.value('', _('Disable'));
+		so.value('salamander', _('Salamander'));
+		so.depends('type', 'hysteria2');
 		so.modalonly = true;
 
 		so = ss.option(form.Value, 'hysteria_obfs_password', _('Obfuscate password'));
 		so.depends('type', 'hysteria');
+		so.depends({'type': 'hysteria2', 'hysteria_obfs_type': /[\s\S]/});
 		so.modalonly = true;
 
 		so = ss.option(form.Value, 'hysteria_down_mbps', _('Max download speed'),
 			_('Max download speed in Mbps.'));
 		so.datatype = 'uinteger';
 		so.depends('type', 'hysteria');
+		so.depends('type', 'hysteria2');
 		so.modalonly = true;
 
 		so = ss.option(form.Value, 'hysteria_up_mbps', _('Max upload speed'),
 			_('Max upload speed in Mbps.'));
 		so.datatype = 'uinteger';
 		so.depends('type', 'hysteria');
+		so.depends('type', 'hysteria2');
 		so.modalonly = true;
 
 		so = ss.option(form.Value, 'hysteria_recv_window_conn', _('QUIC stream receive window'),
@@ -616,7 +681,7 @@ return view.extend({
 		so.default = so.disabled;
 		so.depends('type', 'hysteria');
 		so.modalonly = true;
-		/* Hysteria config end */
+		/* Hysteria (2) config end */
 
 		/* Shadowsocks config start */
 		so = ss.option(form.ListValue, 'shadowsocks_encrypt_method', _('Encrypt method'));
@@ -734,13 +799,54 @@ return view.extend({
 		so.rmempty = false;
 		so.modalonly = true;
 
-		/* VMess / VLESS config start */
+		/* TUIC config start */
 		so = ss.option(form.Value, 'uuid', _('UUID'));
+		so.depends('type', 'tuic');
 		so.depends('type', 'vless');
 		so.depends('type', 'vmess');
 		so.validate = hp.validateUUID;
 		so.modalonly = true;
 
+		so = ss.option(form.ListValue, 'tuic_congestion_control', _('Congestion control algorithm'),
+			_('QUIC congestion control algorithm.'));
+		so.value('cubic', _('CUBIC'));
+		so.value('new_reno', _('New Reno'));
+		so.value('bbr', _('BBR'));
+		so.default = 'cubic';
+		so.depends('type', 'tuic');
+		so.rmempty = false;
+		so.modalonly = true;
+
+		so = ss.option(form.ListValue, 'tuic_udp_relay_mode', _('UDP relay mode'),
+			_('UDP packet relay mode.'));
+		so.value('', _('Default'));
+		so.value('native', _('Native'));
+		so.value('quic', _('QUIC'));
+		so.depends('type', 'tuic');
+		so.modalonly = true;
+
+		so = ss.option(form.Flag, 'tuic_udp_over_stream', _('UDP over stream'),
+			_('This is the TUIC port of the UDP over TCP protocol, designed to provide a QUIC stream based UDP relay mode that TUIC does not provide.'));
+		so.default = so.disabled;
+		so.depends({'type': 'tuic','tuic_udp_relay_mode': ''});
+		so.modalonly = true;
+
+		so = ss.option(form.Flag, 'tuic_enable_zero_rtt', _('Enable 0-RTT handshake'),
+			_('Enable 0-RTT QUIC connection handshake on the client side. This is not impacting much on the performance, as the protocol is fully multiplexed.<br/>' +
+				'Disabling this is highly recommended, as it is vulnerable to replay attacks.'));
+		so.default = so.disabled;
+		so.depends('type', 'tuic');
+		so.modalonly = true;
+
+		so = ss.option(form.Value, 'tuic_heartbeat', _('Heartbeat interval'),
+			_('Interval for sending heartbeat packets for keeping the connection alive (in seconds).'));
+		so.datatype = 'uinteger';
+		so.default = '10';
+		so.depends('type', 'tuic');
+		so.modalonly = true;
+		/* Tuic config end */
+
+		/* VMess / VLESS config start */
 		so = ss.option(form.ListValue, 'vless_flow', _('Flow'));
 		so.value('', _('None'));
 		so.value('xtls-rprx-vision');
@@ -801,18 +907,18 @@ return view.extend({
 			var tls = this.map.findElement('id', 'cbid.homeproxy.%s.tls'.format(section_id)).firstElementChild;
 			if ((value === 'http' && tls.checked) || (value === 'grpc' && !features.with_grpc)) {
 				this.map.findElement('id', 'cbid.homeproxy.%s.http_idle_timeout'.format(section_id)).nextElementSibling.innerHTML =
-					_('Specifies the period of time after which a health check will be performed using a ping frame if no frames have been received on the connection.<br/>' +
+					_('Specifies the period of time (in seconds) after which a health check will be performed using a ping frame if no frames have been received on the connection.<br/>' +
 						'Please note that a ping response is considered a received frame, so if there is no other traffic on the connection, the health check will be executed every interval.');
 
 				this.map.findElement('id', 'cbid.homeproxy.%s.http_ping_timeout'.format(section_id)).nextElementSibling.innerHTML =
-					_('Specifies the timeout duration after sending a PING frame, within which a response must be received.<br/>' +
+					_('Specifies the timeout duration (in seconds) after sending a PING frame, within which a response must be received.<br/>' +
 						'If a response to the PING frame is not received within the specified timeout duration, the connection will be closed.');
 			} else if (value === 'grpc' && features.with_grpc) {
 				this.map.findElement('id', 'cbid.homeproxy.%s.http_idle_timeout'.format(section_id)).nextElementSibling.innerHTML =
-					_('If the transport doesn\'t see any activity after a duration of this time, it pings the client to check if the connection is still active.');
+					_('If the transport doesn\'t see any activity after a duration of this time (in seconds), it pings the client to check if the connection is still active.');
 
 				this.map.findElement('id', 'cbid.homeproxy.%s.http_ping_timeout'.format(section_id)).nextElementSibling.innerHTML =
-					_('The timeout that after performing a keepalive check, the client will wait for activity. If no activity is detected, the connection will be closed.');
+					_('The timeout (in seconds) that after performing a keepalive check, the client will wait for activity. If no activity is detected, the connection will be closed.');
 			}
 		}
 		so.modalonly = true;
@@ -848,7 +954,7 @@ return view.extend({
 		so.modalonly = true;
 
 		so = ss.option(form.Value, 'http_idle_timeout', _('Idle timeout'),
-			_('Specifies the period of time after which a health check will be performed using a ping frame if no frames have been received on the connection.<br/>' +
+			_('Specifies the period of time (in seconds) after which a health check will be performed using a ping frame if no frames have been received on the connection.<br/>' +
 				'Please note that a ping response is considered a received frame, so if there is no other traffic on the connection, the health check will be executed every interval.'));
 		so.datatype = 'uinteger';
 		so.depends('transport', 'grpc');
@@ -856,7 +962,7 @@ return view.extend({
 		so.modalonly = true;
 
 		so = ss.option(form.Value, 'http_ping_timeout', _('Ping timeout'),
-			_('Specifies the timeout duration after sending a PING frame, within which a response must be received.<br/>' +
+			_('Specifies the timeout duration (in seconds) after sending a PING frame, within which a response must be received.<br/>' +
 				'If a response to the PING frame is not received within the specified timeout duration, the connection will be closed.'));
 		so.datatype = 'uinteger';
 		so.depends('transport', 'grpc');
@@ -908,12 +1014,14 @@ return view.extend({
 		so.password = true;
 		so.depends('type', 'wireguard');
 		so.validate = L.bind(hp.validateBase64Key, this, 44);
+		so.rmempty = false;
 		so.modalonly = true;
 
 		so = ss.option(form.Value, 'wireguard_peer_public_key', _('Peer pubkic key'),
 			_('WireGuard peer public key.'));
 		so.depends('type', 'wireguard');
 		so.validate = L.bind(hp.validateBase64Key, this, 44);
+		so.rmempty = false;
 		so.modalonly = true;
 
 		so = ss.option(form.Value, 'wireguard_pre_shared_key', _('Pre-shared key'),
@@ -984,8 +1092,10 @@ return view.extend({
 		so.default = so.disabled;
 		so.depends('type', 'http');
 		so.depends('type', 'hysteria');
+		so.depends('type', 'hysteria2');
 		so.depends('type', 'shadowtls');
 		so.depends('type', 'trojan');
+		so.depends('type', 'tuic');
 		so.depends('type', 'vless');
 		so.depends('type', 'vmess');
 		so.validate = function(section_id, value) {
@@ -993,11 +1103,12 @@ return view.extend({
 				var type = this.map.lookupOption('type', section_id)[0].formvalue(section_id);
 				var tls = this.map.findElement('id', 'cbid.homeproxy.%s.tls'.format(section_id)).firstElementChild;
 
-				if (['hysteria', 'shadowtls'].includes(type)) {
+				if (['hysteria', 'hysteria2', 'shadowtls', 'tuic'].includes(type)) {
 					tls.checked = true;
 					tls.disabled = true;
-				} else
+				} else {
 					tls.disabled = null;
+				}
 			}
 
 			return true;
@@ -1104,7 +1215,7 @@ return view.extend({
 			so.value('random', _('Random'));
 			so.value('randomized', _('Randomized'));
 			so.value('safari', _('Safari'));
-			so.depends({'tls': '1', 'type': /^((?!hysteria$).)+$/});
+			so.depends({'tls': '1', 'type': /^((?!hysteria2?$).)+$/});
 			so.validate = function(section_id, value) {
 				if (section_id) {
 					let tls_reality = this.map.findElement('id', 'cbid.homeproxy.%s.tls_reality'.format(section_id)).firstElementChild;
@@ -1140,6 +1251,12 @@ return view.extend({
 		so = ss.option(form.Flag, 'tcp_fast_open', _('TCP fast open'));
 		so.default = so.disabled;
 		so.modalonly = true;
+
+		if (features.has_mptcp) {
+			so = ss.option(form.Flag, 'tcp_multi_path', _('MultiPath TCP'));
+			so.default = so.disabled;
+			so.modalonly = true;
+		}
 
 		so = ss.option(form.Flag, 'udp_fragment', _('UDP Fragment'),
 			_('Enable UDP fragmentation.'));
@@ -1237,9 +1354,9 @@ return view.extend({
 		o.inputstyle = 'apply';
 		o.inputtitle = function(section_id) {
 			var sublist = uci.get(data[0], section_id, 'subscription_url') || [];
-			if (sublist.length > 0)
+			if (sublist.length > 0) {
 				return _('Update %s subscriptions').format(sublist.length);
-			else {
+			} else {
 				this.readonly = true;
 				return _('No subscription available')
 			}

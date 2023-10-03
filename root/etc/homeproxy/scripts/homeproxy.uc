@@ -78,7 +78,7 @@ export function wGET(url) {
 	if (!url || type(url) !== 'string')
 		return null;
 
-	const output = executeCommand(`/usr/bin/wget -qO- --user-agent 'Wget/1.21 (HomeProxy)' --timeout=10 ${shellQuote(url)}`) || {};
+	const output = executeCommand(`/usr/bin/wget -qO- --user-agent 'Wget/1.21 (HomeProxy, like v2rayN)' --timeout=10 ${shellQuote(url)}`) || {};
 	return trim(output.stdout);
 };
 /* Utilities end */
@@ -86,6 +86,10 @@ export function wGET(url) {
 /* String helper start */
 export function isEmpty(res) {
 	return !res || res === 'nil' || (type(res) in ['array', 'object'] && length(res) === 0);
+};
+
+export function strToBool(str) {
+	return (str === '1') || null;
 };
 
 export function strToInt(str) {
@@ -224,4 +228,4 @@ export function parseURL(url) {
 
 	return objurl;
 };
-/* String parser start */
+/* String parser end */

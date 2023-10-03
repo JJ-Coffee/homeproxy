@@ -51,11 +51,10 @@ function getServiceStatus() {
 function renderStatus(isRunning) {
 	var spanTemp = '<em><span style="color:%s"><strong>%s %s</strong></span></em>';
 	var renderHTML;
-	if (isRunning) {
+	if (isRunning)
 		renderHTML = spanTemp.format('green', _('HomeProxy'), _('RUNNING'));
-	} else {
+	else
 		renderHTML = spanTemp.format('red', _('HomeProxy'), _('NOT RUNNING'));
-	}
 
 	return renderHTML;
 }
@@ -163,7 +162,7 @@ return view.extend({
 		o.value('223.5.5.5', _('Aliyun Public DNS (223.5.5.5)'));
 		o.value('119.29.29.29', _('Tencent Public DNS (119.29.29.29)'));
 		o.value('114.114.114.114', _('Xinfeng Public DNS (114.114.114.114)'));
-		o.default = '208.67.222.222';
+		o.default = '8.8.8.8';
 		o.rmempty = false;
 		o.depends({'routing_mode': 'custom', '!reverse': true});
 		o.validate = function(section_id, value) {
@@ -216,7 +215,7 @@ return view.extend({
 		}
 
 		o = s.taboption('routing', form.Value, 'routing_port', _('Routing ports'),
-			_('Specify target port(s) that get proxied. Multiple ports must be separated by commas.'));
+			_('Specify target ports to be proxied. Multiple ports must be separated by commas.'));
 		o.value('all', _('All ports'));
 		o.value('common', _('Common ports only (bypass P2P traffic)'));
 		o.default = 'common';
@@ -262,8 +261,10 @@ return view.extend({
 		ss = o.subsection;
 		so = ss.option(form.ListValue, 'tcpip_stack', _('TCP/IP stack'),
 			_('TCP/IP stack.'));
-		if (features.with_gvisor)
+		if (features.with_gvisor) {
+			so.value('mixed', _('Mixed'));
 			so.value('gvisor', _('gVisor'));
+		}
 		if (features.with_lwip)
 			so.value('lwip', _('LWIP'));
 		so.value('system', _('System'));
@@ -273,8 +274,10 @@ return view.extend({
 		so.rmempty = false;
 		so.onchange = function(ev, section_id, value) {
 			var desc = ev.target.nextElementSibling;
-			if (value === 'gvisor')
-				desc.innerHTML = _('Based on google/gvisor (recommended).');
+			if (value === 'mixed')
+				desc.innerHTML = _('Mixed <code>system</code> TCP stack and <code>gVisor</code> UDP stack.')
+			else if (value === 'gvisor')
+				desc.innerHTML = _('Based on google/gvisor.');
 			else if (value === 'lwip')
 				desc.innerHTML = _('Upstream archived. Not recommended.');
 			else if (value === 'system')
